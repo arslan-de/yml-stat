@@ -1,25 +1,7 @@
 import pandas as pd
-import requests
-import xmltodict
-import xml
-from pydantic import ValidationError
 
 from yml_stat.model import Root
-
-
-def get_full_name(categories_dict: dict, parent_id: str, prev_name: str) -> str:
-    """
-    Recursively get full category name from netted structure
-    :param categories_dict:
-    :param parent_id:
-    :param prev_name:
-    :return: str
-        Category1 / .. / CategoryN
-    """
-    new_parent, new_name = categories_dict.get(parent_id, ("", ""))
-    new_name = get_full_name(categories_dict, new_parent, f"{new_name} / {prev_name}") if new_name else prev_name
-
-    return new_name
+from yml_stat.utils import get_full_name, parse_yml, get_file, get_model
 
 
 def prepare_category_data(categories: list) -> list:
@@ -40,6 +22,15 @@ def prepare_category_data(categories: list) -> list:
     return category_data
 
 
+def prepare_offers_data(offers: list) -> list:
+    """
+    Prepare offers Name and categoryId
+    :param offers:
+    :return:
+    """
+    return [(offer.categoryId, offer.name) for offer in offers]
+
+
 def get_categories_summary(yml: dict) -> pd.DataFrame:
     """
     Prepare summarise table from raw-dict-data
@@ -49,18 +40,14 @@ def get_categories_summary(yml: dict) -> pd.DataFrame:
         offers      float64
         dtype: object
     """
-    try:
-        root: Root = Root.parse_obj(yml)
-    except ValidationError as error:
-        print(f"Incorrect YML data - {yml}")
-        raise ValidationError(error)
+    root: Root = get_model(yml)
 
     categories: list = root.yml_catalog.shop.categories.category
     category_df = pd.DataFrame(data=prepare_category_data(categories),
                                columns=["Id", "Name"]).set_index("Id")
 
-    offers_list: list = root.yml_catalog.shop.offers.offer
-    offer_df = pd.DataFrame(data=[(offer.categoryId, offer.name) for offer in offers_list],
+    offers: list = root.yml_catalog.shop.offers.offer
+    offer_df = pd.DataFrame(data=prepare_offers_data(offers),
                             columns=["categoryId", "Name"]).set_index("categoryId")
     offer_df = offer_df.groupby(["categoryId"]).count()
 
@@ -81,18 +68,7 @@ def get_yml_statistics(url: str) -> pd.DataFrame:
         offers      float64
         dtype: object
     """
-    try:
-        request: str = requests.get(url).text
-    except requests.exceptions.ConnectionError as error:
-        print(f"Incorrect url: {url}")
-        raise requests.exceptions.ConnectionError(error)
-
-    try:
-        yml_string: dict = xmltodict.parse(request, attr_prefix="", cdata_key="value")
-    except xml.parsers.expat.ExpatError as error:
-        print(f"Parsing error {request}")
-        raise xml.parsers.expat.ExpatError(error)
-
-    categories_summary = get_categories_summary(yml_string)
+    yml: dict = parse_yml(get_file(url))
+    categories_summary = get_categories_summary(yml)
 
     return categories_summary
